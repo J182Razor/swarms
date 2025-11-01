@@ -11,10 +11,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
-      # Add your API keys here or use .env file
-      # - OPENAI_API_KEY=${OPENAI_API_KEY}
-      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      # - GOOGLE_API_KEY=${GOOGLE_API_KEY}
     volumes:
       - ../..:/app
       - ../../data:/app/data
@@ -71,4 +67,4 @@ services:
 
 networks:
   default:
-    name: swarms-network 
+    name: swarms-network
