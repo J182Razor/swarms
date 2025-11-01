@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 import gradio as gr
 from datetime import datetime
+import re
 
 # Import Swarms components
 try:
@@ -395,6 +396,326 @@ def validate_yaml(yaml_content: str) -> str:
 
 
 # ============================================================================
+# CHAT INTERFACE FUNCTIONS
+# ============================================================================
+
+# Global state for chat agents
+chat_agent_state = {
+    "current_agent": None,
+    "agent_name": "Assistant",
+    "conversation_history": [],
+}
+
+
+def parse_chat_command(message: str) -> Dict[str, Any]:
+    """Parse chat commands from user input"""
+    message = message.strip()
+
+    # Check for commands (start with /)
+    if message.startswith("/"):
+        parts = message.split(maxsplit=1)
+        command = parts[0][1:].lower()  # Remove the /
+        args = parts[1] if len(parts) > 1 else ""
+
+        return {
+            "type": "command",
+            "command": command,
+            "args": args,
+            "raw": message
+        }
+    else:
+        return {
+            "type": "message",
+            "content": message,
+            "raw": message
+        }
+
+
+def execute_chat_command(command: str, args: str) -> str:
+    """Execute a chat command"""
+
+    if command == "help":
+        return """
+**Available Commands:**
+
+**Agent Management:**
+• `/create <name>` - Create a new agent with specified name
+• `/agent <name>` - Switch to a different agent
+• `/info` - Show current agent information
+• `/reset` - Reset the current agent and clear history
+
+**Operations:**
+• `/task <description>` - Execute a task with the current agent
+• `/env` - Check environment status
+• `/upgrade` - Upgrade Swarms to latest version
+• `/version` - Show Swarms version
+
+**Configuration:**
+• `/model <name>` - Change the current model (e.g., gpt-4, claude-3)
+• `/temperature <value>` - Set temperature (0.0-2.0)
+• `/streaming on|off` - Enable/disable streaming
+
+**Utilities:**
+• `/clear` - Clear chat history
+• `/save` - Save conversation to file
+• `/help` - Show this help message
+
+**Quick Actions:**
+• Just type a message to chat with the current agent
+• Use natural language for tasks
+
+**Examples:**
+`/create DataAnalyst` - Create agent named DataAnalyst
+`/task Analyze the sales data` - Execute a task
+`/model gpt-4-turbo` - Switch to GPT-4 Turbo
+"""
+
+    elif command == "create":
+        if not args:
+            return "❌ Please specify an agent name. Example: `/create DataAnalyst`"
+
+        try:
+            agent_name = args.strip()
+            agent = Agent(
+                agent_name=agent_name,
+                system_prompt=f"You are {agent_name}, a helpful AI assistant specialized in your domain.",
+                model_name="gpt-4",
+                temperature=0.7,
+                streaming_on=True,
+            )
+
+            chat_agent_state["current_agent"] = agent
+            chat_agent_state["agent_name"] = agent_name
+            chat_agent_state["conversation_history"] = []
+
+            return f"✅ **Agent '{agent_name}' created successfully!**\n\nYou can now chat with {agent_name} or use `/task` to execute specific tasks."
+        except Exception as e:
+            return f"❌ Error creating agent: {str(e)}"
+
+    elif command == "agent":
+        if not args:
+            if chat_agent_state["current_agent"]:
+                return f"📊 Current agent: **{chat_agent_state['agent_name']}**"
+            else:
+                return "❌ No agent currently active. Use `/create <name>` to create one."
+        else:
+            # This would switch to a different agent (could be extended)
+            return f"ℹ️ Agent switching not yet implemented. Current agent: {chat_agent_state['agent_name']}"
+
+    elif command == "info":
+        if not chat_agent_state["current_agent"]:
+            return "❌ No agent currently active. Use `/create <name>` to create one."
+
+        agent = chat_agent_state["current_agent"]
+        return f"""
+**Current Agent Information:**
+
+• **Name:** {chat_agent_state['agent_name']}
+• **Model:** {getattr(agent, 'model_name', 'Unknown')}
+• **Temperature:** {getattr(agent, 'temperature', 'Unknown')}
+• **Streaming:** {getattr(agent, 'streaming_on', False)}
+• **Messages in history:** {len(chat_agent_state['conversation_history'])}
+"""
+
+    elif command == "reset":
+        chat_agent_state["current_agent"] = None
+        chat_agent_state["agent_name"] = "Assistant"
+        chat_agent_state["conversation_history"] = []
+        return "✅ **Agent reset and history cleared.**\n\nUse `/create <name>` to create a new agent."
+
+    elif command == "task":
+        if not args:
+            return "❌ Please specify a task. Example: `/task Analyze this data`"
+
+        if not chat_agent_state["current_agent"]:
+            return "❌ No agent active. Create one first with `/create <name>`"
+
+        try:
+            result = chat_agent_state["current_agent"].run(args)
+            chat_agent_state["conversation_history"].append({
+                "role": "user",
+                "content": f"Task: {args}"
+            })
+            chat_agent_state["conversation_history"].append({
+                "role": "assistant",
+                "content": result
+            })
+            return f"**Task Result:**\n\n{result}"
+        except Exception as e:
+            return f"❌ Error executing task: {str(e)}"
+
+    elif command == "env":
+        try:
+            py_check = check_python_version()
+            api_check = check_api_keys()
+            return f"""
+**Environment Status:**
+
+• **Python:** {py_check[1]} {py_check[2]}
+• **API Keys:** {api_check[1]} {api_check[2]}
+• **Active Agent:** {chat_agent_state['agent_name'] if chat_agent_state['current_agent'] else 'None'}
+"""
+        except Exception as e:
+            return f"❌ Error checking environment: {str(e)}"
+
+    elif command == "upgrade":
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--upgrade", "swarms"],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            if result.returncode == 0:
+                return "✅ **Swarms upgraded successfully!**\n\nRestart the GUI to use the new version."
+            else:
+                return f"❌ Upgrade failed:\n{result.stderr}"
+        except Exception as e:
+            return f"❌ Error during upgrade: {str(e)}"
+
+    elif command == "version":
+        try:
+            version_check = check_swarms_version()
+            return f"**Swarms Version:** {version_check[2]}"
+        except Exception as e:
+            return f"❌ Error checking version: {str(e)}"
+
+    elif command == "model":
+        if not args:
+            return "❌ Please specify a model. Example: `/model gpt-4-turbo`"
+
+        if not chat_agent_state["current_agent"]:
+            return "❌ No agent active. Create one first with `/create <name>`"
+
+        try:
+            chat_agent_state["current_agent"].model_name = args.strip()
+            return f"✅ **Model changed to:** {args.strip()}"
+        except Exception as e:
+            return f"❌ Error changing model: {str(e)}"
+
+    elif command == "temperature":
+        if not args:
+            return "❌ Please specify a temperature value (0.0-2.0). Example: `/temperature 0.7`"
+
+        if not chat_agent_state["current_agent"]:
+            return "❌ No agent active. Create one first with `/create <name>`"
+
+        try:
+            temp = float(args.strip())
+            if temp < 0 or temp > 2:
+                return "❌ Temperature must be between 0.0 and 2.0"
+
+            chat_agent_state["current_agent"].temperature = temp
+            return f"✅ **Temperature set to:** {temp}"
+        except ValueError:
+            return "❌ Invalid temperature value. Must be a number between 0.0 and 2.0"
+        except Exception as e:
+            return f"❌ Error setting temperature: {str(e)}"
+
+    elif command == "streaming":
+        if not chat_agent_state["current_agent"]:
+            return "❌ No agent active. Create one first with `/create <name>`"
+
+        if args.lower() in ["on", "true", "1", "yes"]:
+            chat_agent_state["current_agent"].streaming_on = True
+            return "✅ **Streaming enabled**"
+        elif args.lower() in ["off", "false", "0", "no"]:
+            chat_agent_state["current_agent"].streaming_on = False
+            return "✅ **Streaming disabled**"
+        else:
+            return "❌ Use `/streaming on` or `/streaming off`"
+
+    elif command == "clear":
+        chat_agent_state["conversation_history"] = []
+        return "✅ **Chat history cleared**"
+
+    elif command == "save":
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"chat_history_{timestamp}.json"
+
+            with open(filename, 'w') as f:
+                json.dump({
+                    "agent_name": chat_agent_state["agent_name"],
+                    "timestamp": timestamp,
+                    "history": chat_agent_state["conversation_history"]
+                }, f, indent=2)
+
+            return f"✅ **Conversation saved to:** {filename}"
+        except Exception as e:
+            return f"❌ Error saving conversation: {str(e)}"
+
+    else:
+        return f"❌ Unknown command: `/{command}`\n\nType `/help` to see available commands."
+
+
+def chat_interface(message: str, history: List[List[str]]) -> Tuple[List[List[str]], str]:
+    """Handle chat interface messages"""
+
+    if not message or message.strip() == "":
+        return history, ""
+
+    # Parse the message
+    parsed = parse_chat_command(message)
+
+    if parsed["type"] == "command":
+        # Execute command
+        response = execute_chat_command(parsed["command"], parsed["args"])
+        history.append([message, response])
+        return history, ""
+
+    else:
+        # Regular chat with agent
+        if not chat_agent_state["current_agent"]:
+            response = """
+👋 **Welcome to Swarms Chat!**
+
+No agent is currently active. To get started:
+
+1. Create an agent: `/create <name>`
+2. Or type `/help` to see all commands
+
+**Example:**
+`/create Assistant` - Creates a general assistant
+`/create DataScientist` - Creates a data science specialist
+"""
+            history.append([message, response])
+            return history, ""
+
+        try:
+            # Run the agent with the message
+            agent_response = chat_agent_state["current_agent"].run(message)
+
+            # Add to conversation history
+            chat_agent_state["conversation_history"].append({
+                "role": "user",
+                "content": message
+            })
+            chat_agent_state["conversation_history"].append({
+                "role": "assistant",
+                "content": agent_response
+            })
+
+            history.append([message, str(agent_response)])
+            return history, ""
+
+        except Exception as e:
+            error_msg = f"❌ **Error:** {str(e)}\n\nTry:\n• Check your API keys with `/env`\n• Create a new agent with `/create <name>`\n• Type `/help` for assistance"
+            history.append([message, error_msg])
+            return history, ""
+
+
+def load_chat_examples():
+    """Return example messages for the chat interface"""
+    return [
+        ["/help", "Shows all available commands"],
+        ["/create ResearchAssistant", "Creates a new research assistant agent"],
+        ["/task Summarize the latest AI trends", "Executes a specific task"],
+        ["What can you help me with?", "Regular conversation with the agent"],
+    ]
+
+
+# ============================================================================
 # GRADIO INTERFACE
 # ============================================================================
 
@@ -548,7 +869,166 @@ def create_gui():
                 )
 
             # ================================================================
-            # TAB 3: YAML Configuration
+            # TAB 3: Chat Interface
+            # ================================================================
+            with gr.Tab("💬 Chat with Agent"):
+                gr.Markdown(
+                    """
+                    ### Interactive Chat Interface
+                    Chat with agents in real-time using commands or natural conversation.
+                    Type `/help` to see all available commands.
+                    """
+                )
+
+                with gr.Row():
+                    with gr.Column(scale=3):
+                        # Main chat interface
+                        chatbot = gr.Chatbot(
+                            label="Swarms Chat",
+                            height=500,
+                            show_copy_button=True,
+                            avatar_images=(None, "🤖"),
+                        )
+
+                        with gr.Row():
+                            msg = gr.Textbox(
+                                label="Message",
+                                placeholder="Type a message or /help for commands...",
+                                lines=2,
+                                scale=4,
+                                autofocus=True,
+                            )
+                            submit_btn = gr.Button("Send 💬", scale=1, variant="primary")
+
+                        with gr.Row():
+                            clear_btn = gr.Button("🗑️ Clear Chat", scale=1)
+                            reset_agent_btn = gr.Button("🔄 Reset Agent", scale=1)
+                            save_chat_btn = gr.Button("💾 Save Chat", scale=1)
+
+                    with gr.Column(scale=1):
+                        gr.Markdown("### Quick Commands")
+                        gr.Markdown(
+                            """
+                            **Get Started:**
+                            • `/create <name>` - Create agent
+                            • `/help` - Show all commands
+
+                            **Agent Control:**
+                            • `/info` - Agent info
+                            • `/model <name>` - Change model
+                            • `/temperature <n>` - Set temp
+                            • `/reset` - Reset agent
+
+                            **Operations:**
+                            • `/task <text>` - Execute task
+                            • `/env` - Check environment
+                            • `/version` - Swarms version
+
+                            **Utilities:**
+                            • `/save` - Save conversation
+                            • `/clear` - Clear history
+
+                            **Examples:**
+                            Click below to try:
+                            """
+                        )
+
+                        # Example buttons
+                        ex1 = gr.Button("📝 /create ResearchAssistant", size="sm")
+                        ex2 = gr.Button("❓ /help", size="sm")
+                        ex3 = gr.Button("📊 /info", size="sm")
+                        ex4 = gr.Button("🔧 /env", size="sm")
+                        ex5 = gr.Button("💬 Tell me about AI", size="sm")
+
+                        gr.Markdown("### Agent Status")
+                        agent_status_display = gr.Markdown("**Status:** No agent active")
+
+                # Event handlers
+                def update_status():
+                    if chat_agent_state["current_agent"]:
+                        return f"""
+**Status:** ✅ Active
+
+**Agent:** {chat_agent_state['agent_name']}
+**Model:** {getattr(chat_agent_state['current_agent'], 'model_name', 'Unknown')}
+**Messages:** {len(chat_agent_state['conversation_history'])}
+"""
+                    else:
+                        return "**Status:** ⚠️ No agent active\n\nUse `/create <name>` to start"
+
+                def chat_and_update_status(message, history):
+                    new_history, _ = chat_interface(message, history)
+                    status = update_status()
+                    return new_history, "", status
+
+                submit_btn.click(
+                    fn=chat_and_update_status,
+                    inputs=[msg, chatbot],
+                    outputs=[chatbot, msg, agent_status_display]
+                )
+
+                msg.submit(
+                    fn=chat_and_update_status,
+                    inputs=[msg, chatbot],
+                    outputs=[chatbot, msg, agent_status_display]
+                )
+
+                # Clear button
+                def clear_chat():
+                    chat_agent_state["conversation_history"] = []
+                    return [], update_status()
+
+                clear_btn.click(
+                    fn=clear_chat,
+                    outputs=[chatbot, agent_status_display]
+                )
+
+                # Reset agent button
+                def reset_agent():
+                    chat_agent_state["current_agent"] = None
+                    chat_agent_state["agent_name"] = "Assistant"
+                    chat_agent_state["conversation_history"] = []
+                    return [], update_status()
+
+                reset_agent_btn.click(
+                    fn=reset_agent,
+                    outputs=[chatbot, agent_status_display]
+                )
+
+                # Save chat button
+                def save_conversation():
+                    try:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"chat_history_{timestamp}.json"
+
+                        with open(filename, 'w') as f:
+                            json.dump({
+                                "agent_name": chat_agent_state["agent_name"],
+                                "timestamp": timestamp,
+                                "history": chat_agent_state["conversation_history"]
+                            }, f, indent=2)
+
+                        return [[None, f"✅ Conversation saved to: {filename}"]]
+                    except Exception as e:
+                        return [[None, f"❌ Error saving: {str(e)}"]]
+
+                save_chat_btn.click(
+                    fn=save_conversation,
+                    outputs=[chatbot]
+                )
+
+                # Example button handlers
+                def send_example(text, history):
+                    return chat_and_update_status(text, history)
+
+                ex1.click(lambda: "/create ResearchAssistant", outputs=[msg])
+                ex2.click(lambda: "/help", outputs=[msg])
+                ex3.click(lambda: "/info", outputs=[msg])
+                ex4.click(lambda: "/env", outputs=[msg])
+                ex5.click(lambda: "Tell me about AI", outputs=[msg])
+
+            # ================================================================
+            # TAB 4: YAML Configuration
             # ================================================================
             with gr.Tab("📝 YAML Configuration"):
                 gr.Markdown("### Generate and edit agent configurations in YAML")
@@ -613,7 +1093,7 @@ def create_gui():
                 )
 
             # ================================================================
-            # TAB 4: Run Swarms
+            # TAB 5: Run Swarms
             # ================================================================
             with gr.Tab("🐝 Run Swarms"):
                 gr.Markdown("### Execute multi-agent swarms from YAML configurations")
@@ -658,7 +1138,7 @@ def create_gui():
                 )
 
             # ================================================================
-            # TAB 5: AutoSwarm
+            # TAB 6: AutoSwarm
             # ================================================================
             with gr.Tab("🤖 AutoSwarm"):
                 gr.Markdown("### Generate autonomous swarm configurations using AI")
@@ -690,7 +1170,7 @@ def create_gui():
                 )
 
             # ================================================================
-            # TAB 6: Resources & Support
+            # TAB 7: Resources & Support
             # ================================================================
             with gr.Tab("📚 Resources"):
                 gr.Markdown(
