@@ -1,0 +1,12 @@
+# Swarms GUI Requirements
+# Install with: pip install -r gui_requirements.txt
+
+# Main GUI framework
+gradio>=4.0.0
+
+# All Swarms dependencies
+swarms>=8.0.0
+
+# Additional GUI enhancements
+pyyaml>=6.0
+python-dotenv>=1.0.0
