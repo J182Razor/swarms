@@ -6,8 +6,6 @@ services:
     build:
       context: ../..
       dockerfile: scripts/docker/Dockerfile
-      platforms:
-        - linux/amd64
     image: swarms:latest
     container_name: swarms-container
     environment:
@@ -36,8 +34,6 @@ services:
     build:
       context: ../..
       dockerfile: scripts/docker/Dockerfile
-      platforms:
-        - linux/amd64
     image: swarms:dev
     container_name: swarms-dev-container
     environment:
@@ -58,8 +54,6 @@ services:
     build:
       context: ../..
       dockerfile: scripts/docker/Dockerfile
-      platforms:
-        - linux/amd64
     image: swarms:api
     container_name: swarms-api-container
     environment:
