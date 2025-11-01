@@ -18,9 +18,9 @@ services:
       # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       # - GOOGLE_API_KEY=${GOOGLE_API_KEY}
     volumes:
-      - .:/app
-      - ./data:/app/data
-      - ./models:/app/models
+      - ../..:/app
+      - ../../data:/app/data
+      - ../../models:/app/models
     working_dir: /app
     command: python test_docker.py
     restart: unless-stopped
@@ -44,9 +44,9 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
     volumes:
-      - .:/app
-      - ./data:/app/data
-      - ./models:/app/models
+      - ../..:/app
+      - ../../data:/app/data
+      - ../../models:/app/models
     working_dir: /app
     command: bash
     stdin_open: true
@@ -66,7 +66,7 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
     volumes:
-      - .:/app
+      - ../..:/app
     working_dir: /app
     ports:
       - "8000:8000"
